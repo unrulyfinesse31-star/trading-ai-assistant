@@ -1,0 +1,100 @@
+from dataclasses import dataclass, field
+from typing import Dict, List
+
+
+@dataclass
+class Order:
+    id: int
+    symbol: str
+    side: str
+    quantity: float
+    price: float
+    status: str = "OPEN"
+    created_at: str = ""
+    strategy: str = "baseline"
+
+
+@dataclass
+class Position:
+    symbol: str
+    qty: float = 0.0
+    avg_price: float = 0.0
+    unrealized_pnl: float = 0.0
+    side: str = "FLAT"
+
+
+class ExecutionEngine:
+    def __init__(self, symbol_states: Dict[str, dict], max_orders: int = 200):
+        self.orders: List[Order] = []
+        self.positions: Dict[str, Position] = {}
+        self.order_counter = 1
+        self.symbol_states = symbol_states
+        self.max_orders = max_orders
+
+    def place_order(self, symbol: str, side: str, quantity: float, price: float, strategy: str = "baseline") -> Order:
+        order = Order(
+            id=self.order_counter,
+            symbol=symbol,
+            side=side.upper(),
+            quantity=quantity,
+            price=price,
+            status="FILLED",
+            created_at="now",
+            strategy=strategy,
+        )
+        self.order_counter += 1
+        self.orders.append(order)
+        self._apply_position(order)
+        if len(self.orders) > self.max_orders:
+            self.orders = self.orders[-self.max_orders:]
+        return order
+
+    def _apply_position(self, order: Order):
+        pos = self.positions.setdefault(order.symbol, Position(symbol=order.symbol))
+        if order.side == "BUY":
+            if pos.qty >= 0:
+                pos.qty += order.quantity
+                pos.avg_price = ((pos.avg_price * (pos.qty - order.quantity)) + (order.price * order.quantity)) / pos.qty if pos.qty else order.price
+            else:
+                existing_value = abs(pos.qty) * pos.avg_price
+                new_qty = abs(pos.qty) + order.quantity
+                pos.avg_price = (existing_value + order.quantity * order.price) / new_qty
+                pos.qty = new_qty if pos.qty >= 0 else -new_qty
+        elif order.side == "SELL":
+            if pos.qty <= 0:
+                pos.qty -= order.quantity
+                pos.avg_price = ((pos.avg_price * (abs(pos.qty) - order.quantity)) + (order.price * order.quantity)) / (abs(pos.qty)) if abs(pos.qty) else order.price
+            else:
+                existing_value = abs(pos.qty) * pos.avg_price
+                new_qty = abs(pos.qty) + order.quantity
+                pos.avg_price = (existing_value + order.quantity * order.price) / new_qty
+                pos.qty = -(new_qty)
+
+        pos.side = "LONG" if pos.qty > 0 else "SHORT" if pos.qty < 0 else "FLAT"
+
+    def snapshot_positions(self, latest_prices: Dict[str, float]) -> List[dict]:
+        snapshot = []
+        for symbol, pos in self.positions.items():
+            price = latest_prices.get(symbol, pos.avg_price)
+            pos.unrealized_pnl = (price - pos.avg_price) * pos.qty if pos.qty != 0 else 0.0
+            snapshot.append({
+                "symbol": symbol,
+                "qty": round(pos.qty, 6),
+                "avg_price": round(pos.avg_price, 6),
+                "mark_price": round(price, 6),
+                "unrealized_pnl": round(pos.unrealized_pnl, 2),
+                "side": pos.side,
+            })
+        return snapshot
+
+    def get_orders(self) -> List[dict]:
+        return [{
+            "id": o.id,
+            "symbol": o.symbol,
+            "side": o.side,
+            "quantity": o.quantity,
+            "price": o.price,
+            "status": o.status,
+            "strategy": o.strategy,
+            "created_at": o.created_at,
+        } for o in self.orders]

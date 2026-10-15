@@ -8,7 +8,6 @@ type Props = {
 
 export default function PriceChart({ symbol, wsUrl }: Props) {
   const chartDivRef = useRef<HTMLDivElement | null>(null);
-  const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
@@ -16,48 +15,52 @@ export default function PriceChart({ symbol, wsUrl }: Props) {
     const chart = createChart(container, {
       width: container.clientWidth,
       height: container.clientHeight,
-      layout: { backgroundColor: "#ffffff", textColor: "#333" },
-      timeScale: { timeVisible: true, secondsVisible: true },
+      layout: { backgroundColor: "#0b1220", textColor: "#d5dbe4" },
+      grid: {
+        vertLines: { color: "rgba(120,120,120,0.1)" },
+        horzLines: { color: "rgba(120,120,120,0.1)" },
+      },
+      crosshair: { mode: 1 },
+      rightPriceScale: { borderColor: "rgba(120,120,120,0.4)" },
+      timeScale: { borderColor: "rgba(120,120,120,0.4)" },
     });
-    const candleSeries = chart.addCandlestickSeries();
-    seriesRef.current = candleSeries;
 
-    // handle resize
+    const candleSeries = chart.addCandlestickSeries({
+      upColor: "#22c55e",
+      downColor: "#ef4444",
+      borderVisible: false,
+      wickUpColor: "#22c55e",
+      wickDownColor: "#ef4444",
+    });
+
     const onResize = () => {
       chart.applyOptions({ width: container.clientWidth, height: container.clientHeight });
     };
     window.addEventListener("resize", onResize);
 
-    // connect websocket
     const ws = new WebSocket(wsUrl);
-    ws.onopen = () => {
-      console.log("WS open for", symbol);
-    };
-    ws.onmessage = (ev) => {
+    wsRef.current = ws;
+
+    ws.onmessage = (event) => {
       try {
-        const msg = JSON.parse(ev.data);
-        if (msg.error) {
-          console.error("WS error:", msg.error);
-          return;
-        }
-        // convert ms timestamp -> seconds unix for lightweight-charts
-        const t = Math.floor(msg.timestamp / 1000);
-        const candle: CandlestickData = {
-          time: t,
-          open: msg.open,
-          high: msg.high,
-          low: msg.low,
-          close: msg.close,
+        const candle = JSON.parse(event.data);
+        if (candle.error) return;
+        const data: CandlestickData = {
+          time: Math.floor(candle.timestamp / 1000) as any,
+          open: candle.open,
+          high: candle.high,
+          low: candle.low,
+          close: candle.close,
         };
-        // update chart
-        candleSeries.update(candle);
-      } catch (e) {
-        console.error("WS parse error", e);
+        candleSeries.update(data);
+      } catch (error) {
+        console.error("Failed to parse candle", error);
       }
     };
-    ws.onclose = () => console.log("WS closed for", symbol);
-    ws.onerror = (e) => console.error("WS error", e);
-    wsRef.current = ws;
+
+    ws.onerror = (event) => {
+      console.error("WebSocket error", event);
+    };
 
     return () => {
       wsRef.current?.close();
@@ -66,5 +69,5 @@ export default function PriceChart({ symbol, wsUrl }: Props) {
     };
   }, [symbol, wsUrl]);
 
-  return <div ref={chartDivRef} style={{ width: "100%", height: "100%" }} />;
+  return <div ref={chartDivRef} style={{ width: "100%", height: "440px" }} />;
 }
