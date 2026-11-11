@@ -1,6 +1,6 @@
 # Trading AI Assistant
 
-Institutional trading AI demo scaffold with a FastAPI backend. Broker adapters default to paper/test environments; order submission is disabled unless explicitly enabled. This is a demo, not financial advice or production-ready trading software.
+FastAPI backend scaffold for a trading AI demo. Broker adapters, order submission, database persistence, and a model pipeline are not implemented. This is not financial advice or production-ready trading software.
 
 ## Backend
 
@@ -24,10 +24,11 @@ Health check: `GET /health`; Prometheus metrics: `GET /metrics`.
 
 ### Configuration and safety
 
-- Configure `DATABASE_URL` to use PostgreSQL. The default is a local development URL.
-- Set a strong `JWT_SECRET`; the application refuses to start without one.
-- Binance uses sandbox mode by default. OANDA defaults to its practice API; Interactive Brokers defaults to paper-trading port `7497`.
-- All adapter order methods require `ENABLE_LIVE_ORDERS=true`. Keep it unset unless you understand and have independently validated the risks. Use broker paper accounts and explicit risk controls before any live use.
+- Set a strong `JWT_SECRET`; the application refuses to start without one. Authentication is not implemented yet, so this setting is only a startup prerequisite.
+- `DATABASE_URL` is reserved for future persistence; the scaffold does not connect to a database.
+- No broker adapters or order methods are included. Any future integration must use Binance sandbox, OANDA practice, and Interactive Brokers paper-trading port `7497` by default, and must require `ENABLE_LIVE_ORDERS=true` before any live order submission.
 - Store credentials in a secret manager or environment variables. Never commit credentials or `.env` files.
 
-The included model pipeline is a training example; its output is not a trading recommendation. Validate data, costs, and risk controls independently before use.
+No model pipeline is included. Validate data, costs, and risk controls independently before any future use.
+
+Run backend tests with `pip install -r backend/requirements-dev.txt` and `python -m pytest`.
