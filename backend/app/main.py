@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import create_access_token, hash_password, verify_password
 from app.config import settings
-from app.db import SessionLocal, User, init_db, get_db
+from app.db import User, get_db, init_db
 
 security = HTTPBearer(auto_error=False)
 
