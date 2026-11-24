@@ -4,8 +4,8 @@
 //| Requires a HEDGING account for independent position management.  |
 //+------------------------------------------------------------------+
 #property strict
-#property version   "1.00"
-#property description "Gold M1 micro-scalper with noise filters, stepped entries and per-ticket trailing locks."
+#property version   "1.01"
+#property description "Gold M1 micro-scalper with noise filters, stepped entries, per-ticket trails and $10 basket close."
 
 #include <Trade/Trade.mqh>
 CTrade trade;
@@ -27,12 +27,13 @@ input int    InpATRPeriod              = 14;
 input double InpMinATRPrice            = 0.03;
 input double InpMaxATRPrice            = 3.00;
 input int    InpMaxSpreadPoints        = 60;
-input double InpEntryStepPrice         = 0.20; // Gold price units; e.g. 0.20 means $0.20 move on XAUUSD
+input double InpEntryStepPrice         = 0.20;
 
 input group "PROTECTION / TRAILING"
 input double InpInitialStopPrice      = 0.60;
 input double InpTrailStartPrice       = 0.30;
 input double InpTrailDistancePrice    = 0.15;
+input double InpBasketTakeProfitMoney = 10.0; // Close all EA positions when basket floating P/L reaches this amount
 input double InpDailyLossLimitMoney   = 10.0; // Account currency; 0 disables
 
 input group "DASHBOARD"
@@ -45,6 +46,7 @@ int hATR  = INVALID_HANDLE;
 datetime lastBarTime = 0;
 int lastSignal = 0;
 string statusText = "INITIALIZING";
+bool basketCloseTriggered = false;
 
 struct BasketInfo
 {
@@ -98,6 +100,28 @@ bool GetBasket(BasketInfo &b)
       }
    }
    return true;
+}
+
+// Closes only this EA's positions on the current chart symbol.
+// If a close is rejected, the close cycle remains active and retries on later ticks.
+void CloseBasketPositions()
+{
+   trade.SetExpertMagicNumber(InpMagic);
+   trade.SetDeviationInPoints(InpDeviationPoints);
+   trade.SetTypeFillingBySymbol(_Symbol);
+
+   for(int i=PositionsTotal()-1;i>=0;i--)
+   {
+      ulong ticket=PositionGetTicket(i);
+      if(ticket==0 || !PositionSelectByTicket(ticket)) continue;
+      if(PositionGetString(POSITION_SYMBOL)!=_Symbol) continue;
+      if((ulong)PositionGetInteger(POSITION_MAGIC)!=InpMagic) continue;
+
+      if(!trade.PositionClose(ticket,(ulong)InpDeviationPoints))
+         Print("Basket close failed. Ticket=",ticket,
+               " Retcode=",trade.ResultRetcode()," ",
+               trade.ResultRetcodeDescription());
+   }
 }
 
 double TodayClosedProfit()
@@ -245,6 +269,8 @@ void UpdateDashboard(const BasketInfo &b)
            "\nSTATUS: ",statusText,
            "\nMODE: ",mode,"     OPEN: ",b.count," / ",InpMaxTrades,
            "\nBUY: ",b.buys,"     SELL: ",b.sells,
+           "\nBASKET FLOATING: ",DoubleToString(b.floating,2),
+           " / TARGET: ",DoubleToString(InpBasketTakeProfitMoney,2),
            "\nFLOATING P/L: ",DoubleToString(b.floating,2),
            "     TODAY: ",DoubleToString(day,2),
            "\nADX: ",DoubleToString(adx,1),"     ATR: ",DoubleToString(atr,_Digits),
@@ -260,7 +286,8 @@ int OnInit()
       Print("NOTICE: This EA is designed for the M1 chart.");
    if(InpMaxTrades<1 || InpMaxTrades>10 || InpLots<=0.0 ||
       InpEntryStepPrice<=0.0 || InpInitialStopPrice<=0.0 ||
-      InpTrailStartPrice<=0.0 || InpTrailDistancePrice<=0.0)
+      InpTrailStartPrice<=0.0 || InpTrailDistancePrice<=0.0 ||
+      InpBasketTakeProfitMoney<0.0)
       return INIT_PARAMETERS_INCORRECT;
 
    hFast=iMA(_Symbol,PERIOD_M1,InpFastEMA,0,MODE_EMA,PRICE_CLOSE);
@@ -294,6 +321,32 @@ void OnTick()
 {
    BasketInfo basket;
    GetBasket(basket);
+
+   // Once the target is touched, keep closing/retrying until this EA's
+   // entire symbol basket is flat. No fresh entries during the close cycle.
+   if(!basketCloseTriggered && InpBasketTakeProfitMoney>0.0 &&
+      basket.count>0 && basket.floating>=InpBasketTakeProfitMoney)
+   {
+      basketCloseTriggered=true;
+      statusText="BASKET TARGET HIT - CLOSING ALL";
+   }
+
+   if(basketCloseTriggered)
+   {
+      CloseBasketPositions();
+      GetBasket(basket);
+      if(basket.count==0)
+      {
+         basketCloseTriggered=false;
+         lastSignal=0; // Require a new EMA cross for the next basket.
+         statusText="BASKET CLOSED - TARGET REACHED";
+      }
+      else
+         statusText="BASKET CLOSE IN PROGRESS - RETRYING";
+      UpdateDashboard(basket);
+      return;
+   }
+
    ManageIndividualTrails();
 
    if(DailyLossBlocked(basket))
